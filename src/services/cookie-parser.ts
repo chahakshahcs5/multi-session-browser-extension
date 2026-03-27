@@ -71,10 +71,12 @@ function normaliseCookie(obj: Record<string, unknown>, hostname: string): Cookie
     path: obj.path ? String(obj.path) : '/',
     secure: typeof obj.secure === 'boolean' ? obj.secure : true,
     httpOnly: typeof obj.httpOnly === 'boolean' ? obj.httpOnly : false,
+    hostOnly: typeof obj.hostOnly === 'boolean' ? obj.hostOnly : false,
     sameSite: validateSameSite(obj.sameSite),
-    expirationDate: typeof obj.expirationDate === 'number'
-      ? obj.expirationDate
-      : Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60, // 1 year default
+    expirationDate:
+      typeof obj.expirationDate === 'number'
+        ? obj.expirationDate
+        : undefined,
   };
 }
 
