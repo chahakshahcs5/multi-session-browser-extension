@@ -41,6 +41,8 @@ export async function captureCookies(hostname: string, storeId?: string): Promis
     httpOnly: c.httpOnly,
     sameSite: c.sameSite as CookieEntry['sameSite'],
     expirationDate: c.expirationDate,
+    hostOnly: c.hostOnly,
+    partitionKey: c.partitionKey,
   }));
 }
 
@@ -53,22 +55,34 @@ export async function applyCookies(hostname: string, cookies: CookieEntry[], sto
 
   for (const cookie of cookies) {
     const url = buildCookieUrl(cookie);
+
     try {
       const details: chrome.cookies.SetDetails = {
         url,
         name: cookie.name,
         value: cookie.value,
-        domain: cookie.domain,
-        path: cookie.path || '/',
+        path: cookie.path || "/",
         secure: cookie.secure,
         httpOnly: cookie.httpOnly,
         sameSite: cookie.sameSite as ChromeSameSite,
-        expirationDate: cookie.expirationDate,
+        storeId,
       };
-      if (storeId) details.storeId = storeId;
+
+      if (!cookie.hostOnly && cookie.domain) {
+        details.domain = cookie.domain;
+      }
+
+      if (cookie.expirationDate) {
+        details.expirationDate = cookie.expirationDate;
+      }
+
+      if ((cookie as any).partitionKey) {
+        (details as any).partitionKey = (cookie as any).partitionKey;
+      }
+
       await chrome.cookies.set(details);
     } catch (err) {
-      console.warn(`Failed to set cookie "${cookie.name}":`, err);
+      console.warn(`Failed to set cookie "${cookie.name}" (${cookie.domain}${cookie.path}):`, err);
     }
   }
 }

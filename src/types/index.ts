@@ -8,6 +8,8 @@ export interface CookieEntry {
   httpOnly: boolean;
   sameSite: 'no_restriction' | 'lax' | 'strict' | 'unspecified';
   expirationDate?: number;
+  hostOnly?: boolean;
+  partitionKey?: chrome.cookies.CookiePartitionKey;
 }
 
 /** A saved session (account) for a site */
