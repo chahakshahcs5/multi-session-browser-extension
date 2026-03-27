@@ -1,38 +1,66 @@
 # Multi-Session Extension
 
-A Chrome extension that lets you save, label, and switch between multiple cookie sessions (accounts) per website.
+A Chrome extension that lets you save, label, and switch between multiple cookie sessions (accounts) per website — with **per-tab session isolation** so each tab runs its own account independently.
 
 ## Features
 
+### Core
 - **Session CRUD** — Create, read, update, and delete sessions per site
 - **Capture Current** — Snapshot your browser's current cookies into a new session
 - **Manual Entry** — Add cookies via JSON array/object or `name=value` text format
-- **Switch Sessions** — Apply a session's cookies and auto-reload the page
 - **Copy Cookies** — Copy a session's cookies as JSON to the clipboard
 - **Per-Site Isolation** — Sessions are stored independently per hostname
-- **Persistent Storage** — All data is saved in `chrome.storage.local` and survives browser restarts
+- **Persistent Storage** — All data saved in `chrome.storage.local`, survives browser restarts
+
+### Tab-Level Control
+- **Per-Tab Sessions** — Each tab independently runs its own session for a site
+- **Default Session** — A designated session that is automatically applied to every new tab
+- **Silent Cookie Swap** — When you switch tabs, cookies are swapped automatically *without reloading*
+- **Tab Fallback** — If a tab's mapped session is deleted, it falls back to the default session
+- **New Window / Incognito** — Works across new windows and incognito tabs (`storeId`-aware)
+
+### Delete Rules
+- Deleting the **active** session → the default session takes over for that tab
+- Deleting the **default** session (not active) → the active session becomes the new default
+- A session that is **both active + default** cannot be deleted (must reassign one role first)
+
+### All Sessions Manager
+- Full-page management UI accessible from the popup header
+- View and manage sessions across **all websites** in one place
+- **Accordion** site groups — collapse/expand per host
+- **Smart search** — search by hostname (shows all sessions) or by session label (shows only matches)
+- Full CRUD: add, edit, delete, set default, copy cookies
+
+### UI
 - **Light/Dark Theme** — Toggle between themes, persisted in localStorage
+- **Glassmorphism** design with smooth animations
+- **480px** wide popup with proper vertical scrolling
 
 ## Project Structure
 
 ```
 src/
 ├── background/
-│   └── index.ts          # Service worker: message handler for cookie operations
+│   └── index.ts              # Service worker: tab listeners, cookie swap, message handler
 ├── popup/
-│   ├── index.html        # Popup layout (session list, modals, toast)
-│   ├── index.ts          # Popup logic (init, CRUD handlers, theme toggle)
-│   └── styles.css        # Dark/light theme styles with glassmorphism
+│   ├── index.html            # Popup layout (header, session list, modals)
+│   ├── index.ts              # Popup logic (per-tab display, delete rules, CRUD)
+│   └── styles.css            # Dark/light theme styles
+├── manage/
+│   ├── index.html            # All Sessions Manager page layout
+│   ├── index.ts              # Full-page CRUD for all hosts/sessions
+│   └── styles.css            # Full-page styles with accordion
 ├── services/
-│   ├── cookies.ts        # Capture / apply / clear browser cookies
-│   ├── cookie-parser.ts  # Parse JSON or text cookie input
-│   └── storage.ts        # CRUD for sessions in chrome.storage.local
+│   ├── cookies.ts            # Capture / apply / clear cookies (storeId-aware)
+│   ├── cookie-parser.ts      # Parse JSON or text cookie input
+│   ├── storage.ts            # Session CRUD + defaultSessionId in chrome.storage.local
+│   └── tab-session-map.ts    # In-memory + persisted tab↔session mapping
 ├── types/
-│   └── index.ts          # TypeScript interfaces (CookieEntry, Session, messages)
-├── manifest.json         # Extension manifest (MV3)
-└── vite-env.d.ts         # Vite type declarations
+│   └── index.ts              # TypeScript interfaces (CookieEntry, Session, messages)
+├── manifest.json             # Extension manifest (MV3, incognito: spanning)
+└── vite-env.d.ts
 public/
-└── icon/                 # Extension icons (16–128px)
+└── icon/                     # Extension icons (16–128px)
 ```
 
 ## Development
