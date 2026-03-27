@@ -1,12 +1,13 @@
 import type { Session, ActiveTabResponse, CookieEntry } from '../types';
-import { getSiteData, addSession, updateSession, deleteSession, setActiveSession } from '../services/storage';
+import { getSiteData, addSession, updateSession, deleteSession } from '../services/storage';
 import { parseCookieInput } from '../services/cookie-parser';
 
 // ─── State ───
 let currentHostname = '';
 let currentTabId = 0;
 let sessions: Session[] = [];
-let activeSessionId: string | null = null;
+let defaultSessionId: string | null = null;
+let tabSessionId: string | null = null; // session mapped to CURRENT tab
 let editingSessionId: string | null = null; // null = adding new
 
 // ─── DOM refs ───
@@ -23,6 +24,7 @@ const $emptyState = document.getElementById('empty-state')!;
 const $btnCapture = document.getElementById('btn-capture')!;
 const $btnAdd = document.getElementById('btn-add')!;
 const $btnTheme = document.getElementById('btn-theme')!;
+const $btnManageAll = document.getElementById('btn-manage-all')!;
 
 const $modalOverlay = document.getElementById('modal-overlay')!;
 const $modalTitle = document.getElementById('modal-title')!;
@@ -125,7 +127,16 @@ function showApp() {
 async function loadSessions() {
   const siteData = await getSiteData(currentHostname);
   sessions = siteData.sessions;
-  activeSessionId = siteData.activeSessionId;
+  defaultSessionId = siteData.defaultSessionId;
+
+  // Get the session mapped to the current tab
+  const tabResponse = await chrome.runtime.sendMessage({
+    type: 'GET_TAB_SESSION',
+    tabId: currentTabId,
+    hostname: currentHostname,
+  });
+  tabSessionId = tabResponse?.sessionId ?? null;
+
   renderSessions();
 }
 
@@ -143,7 +154,8 @@ function renderSessions() {
 
   $sessionList.innerHTML = sessions
     .map((session) => {
-      const isActive = session.id === activeSessionId;
+      const isTabActive = session.id === tabSessionId;
+      const isDefault = session.id === defaultSessionId;
       const cookieCount = session.cookies.length;
       const updatedAt = new Date(session.updatedAt).toLocaleDateString('en-US', {
         month: 'short',
@@ -152,24 +164,38 @@ function renderSessions() {
         minute: '2-digit',
       });
 
+      // Build badges
+      const badges: string[] = [];
+      if (isTabActive) badges.push('<span class="tab-badge">This Tab</span>');
+      if (isDefault) badges.push('<span class="default-badge">Default</span>');
+
       return `
-        <div class="session-card ${isActive ? 'active' : ''}" data-id="${session.id}">
+        <div class="session-card ${isTabActive ? 'active' : ''} ${isDefault ? 'default' : ''}" data-id="${session.id}">
           <div class="session-card-header">
             <span class="session-label">
               ${escapeHtml(session.label)}
-              ${isActive ? '<span class="active-badge">Active</span>' : ''}
+              ${badges.join('')}
             </span>
           </div>
           <div class="session-meta">${cookieCount} cookie${cookieCount !== 1 ? 's' : ''} · ${updatedAt}</div>
           <div class="session-actions">
             ${
-              isActive
+              isTabActive
                 ? '<button class="btn btn-secondary btn-sm" disabled>Current</button>'
-                : `<button class="btn btn-switch btn-sm" data-action="switch" data-id="${session.id}">Switch</button>`
+                : `<button class="btn btn-switch btn-sm" data-action="switch" data-id="${session.id}">Use in Tab</button>`
+            }
+            ${
+              isDefault
+                ? '<button class="btn btn-secondary btn-sm" disabled>Default</button>'
+                : `<button class="btn btn-default btn-sm" data-action="set-default" data-id="${session.id}" title="Use for new tabs">⭐ Set Default</button>`
             }
             <button class="btn btn-copy btn-sm" data-action="copy" data-id="${session.id}" title="Copy cookies to clipboard">📋 Copy</button>
             <button class="btn btn-ghost btn-sm" data-action="edit" data-id="${session.id}">Edit</button>
-            <button class="btn btn-ghost btn-sm" data-action="delete" data-id="${session.id}">Delete</button>
+            ${
+              isTabActive && isDefault
+                ? '<button class="btn btn-ghost btn-sm" disabled title="Cannot delete: session is both active and default">Delete</button>'
+                : `<button class="btn btn-ghost btn-sm" data-action="delete" data-id="${session.id}">Delete</button>`
+            }
           </div>
         </div>
       `;
@@ -197,6 +223,9 @@ $sessionList.addEventListener('click', async (e) => {
   switch (action) {
     case 'switch':
       await handleSwitch(id);
+      break;
+    case 'set-default':
+      await handleSetDefault(id);
       break;
     case 'copy':
       await handleCopy(id);
@@ -227,6 +256,11 @@ $btnAdd.addEventListener('click', () => {
 // Theme toggle
 $btnTheme.addEventListener('click', toggleTheme);
 
+// Open all-sessions management page
+$btnManageAll.addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('src/manage/index.html') });
+});
+
 // Modal close / cancel
 $btnCancel.addEventListener('click', closeModal);
 $btnModalClose.addEventListener('click', closeModal);
@@ -255,6 +289,7 @@ async function handleCapture() {
     const cookies: CookieEntry[] = await chrome.runtime.sendMessage({
       type: 'CAPTURE_CURRENT',
       hostname: currentHostname,
+      tabId: currentTabId,
     });
 
     if (!cookies || cookies.length === 0) {
@@ -264,7 +299,16 @@ async function handleCapture() {
 
     const label = `Session ${sessions.length + 1}`;
     const session = await addSession(currentHostname, label, cookies);
-    await setActiveSession(currentHostname, session.id);
+
+    // Map the captured session to this tab
+    await chrome.runtime.sendMessage({
+      type: 'SET_TAB_SESSION',
+      tabId: currentTabId,
+      hostname: currentHostname,
+      sessionId: session.id,
+      cookies: session.cookies,
+    });
+
     await loadSessions();
     showToast(`Captured ${cookies.length} cookies`);
   } catch (err) {
@@ -289,15 +333,30 @@ async function handleSwitch(sessionId: string) {
       hostname: currentHostname,
       cookies: session.cookies,
       tabId: currentTabId,
+      sessionId: sessionId,
     });
 
-    await setActiveSession(currentHostname, sessionId);
     await loadSessions();
   } catch (err) {
     console.error('Switch failed:', err);
     showToast('Failed to switch session');
   } finally {
     btns.forEach((b) => b.removeAttribute('disabled'));
+  }
+}
+
+async function handleSetDefault(sessionId: string) {
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'SET_DEFAULT_SESSION',
+      hostname: currentHostname,
+      sessionId,
+    });
+    await loadSessions();
+    showToast('Default session updated');
+  } catch (err) {
+    console.error('Set default failed:', err);
+    showToast('Failed to set default session');
   }
 }
 
@@ -375,6 +434,15 @@ function handleDeletePrompt(sessionId: string) {
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) return;
 
+  const isTabActive = sessionId === tabSessionId;
+  const isDefault = sessionId === defaultSessionId;
+
+  // Block deletion of session that is both active + default
+  if (isTabActive && isDefault) {
+    showToast('Cannot delete: session is both active and default');
+    return;
+  }
+
   pendingDeleteId = sessionId;
   $deleteLabel.textContent = session.label;
   $deleteOverlay.classList.remove('hidden');
@@ -383,8 +451,37 @@ function handleDeletePrompt(sessionId: string) {
 async function handleDeleteConfirm() {
   if (!pendingDeleteId) return;
 
+  const deletingId = pendingDeleteId;
+  const isTabActive = deletingId === tabSessionId;
+  const isDefault = deletingId === defaultSessionId;
+
   try {
-    await deleteSession(currentHostname, pendingDeleteId);
+    // Delete the session
+    await deleteSession(currentHostname, deletingId);
+
+    // Rule 1: Deleting active session → default becomes active for this tab
+    if (isTabActive && defaultSessionId && defaultSessionId !== deletingId) {
+      const defaultSession = sessions.find((s) => s.id === defaultSessionId);
+      if (defaultSession) {
+        await chrome.runtime.sendMessage({
+          type: 'SET_TAB_SESSION',
+          tabId: currentTabId,
+          hostname: currentHostname,
+          sessionId: defaultSessionId,
+          cookies: defaultSession.cookies,
+        });
+      }
+    }
+
+    // Rule 2: Deleting default session (not active) → active becomes default
+    if (isDefault && !isTabActive && tabSessionId) {
+      await chrome.runtime.sendMessage({
+        type: 'SET_DEFAULT_SESSION',
+        hostname: currentHostname,
+        sessionId: tabSessionId,
+      });
+    }
+
     closeDeleteDialog();
     await loadSessions();
   } catch (err) {

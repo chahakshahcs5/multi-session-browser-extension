@@ -16,7 +16,20 @@ async function saveAllData(data: Record<string, SiteData>): Promise<void> {
 /** Get data for a specific site */
 export async function getSiteData(hostname: string): Promise<SiteData> {
   const all = await getAllData();
-  return all[hostname] || { sessions: [], activeSessionId: null };
+  const raw = all[hostname] || { sessions: [], defaultSessionId: null };
+
+  // Migrate legacy data: rename activeSessionId → defaultSessionId
+  if ('activeSessionId' in raw && !('defaultSessionId' in raw)) {
+    (raw as SiteData).defaultSessionId = (raw as Record<string, unknown>).activeSessionId as string | null;
+    delete (raw as Record<string, unknown>).activeSessionId;
+  }
+
+  // Auto-set default if exactly 1 session and no default set
+  if (raw.sessions.length === 1 && !raw.defaultSessionId) {
+    raw.defaultSessionId = raw.sessions[0].id;
+  }
+
+  return raw;
 }
 
 /** Save data for a specific site */
@@ -47,6 +60,12 @@ export async function addSession(
     updatedAt: now,
   };
   siteData.sessions.push(session);
+
+  // Auto-set default if this is the first/only session
+  if (siteData.sessions.length === 1) {
+    siteData.defaultSessionId = session.id;
+  }
+
   await saveSiteData(hostname, siteData);
   return session;
 }
@@ -76,20 +95,24 @@ export async function deleteSession(hostname: string, sessionId: string): Promis
   if (idx === -1) return false;
 
   siteData.sessions.splice(idx, 1);
-  if (siteData.activeSessionId === sessionId) {
-    siteData.activeSessionId = null;
+
+  // Clear default if the deleted session was the default
+  if (siteData.defaultSessionId === sessionId) {
+    // Auto-set to the remaining session if exactly 1 left, else null
+    siteData.defaultSessionId = siteData.sessions.length === 1 ? siteData.sessions[0].id : null;
   }
+
   await saveSiteData(hostname, siteData);
   return true;
 }
 
-/** Mark a session as the active one for a site */
-export async function setActiveSession(
+/** Mark a session as the default one for new tabs */
+export async function setDefaultSession(
   hostname: string,
   sessionId: string | null
 ): Promise<void> {
   const siteData = await getSiteData(hostname);
-  siteData.activeSessionId = sessionId;
+  siteData.defaultSessionId = sessionId;
   await saveSiteData(hostname, siteData);
 }
 

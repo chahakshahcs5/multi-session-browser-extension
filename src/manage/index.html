@@ -8,69 +8,42 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./styles.css" />
     <script type="module" src="./index.ts"></script>
-    <title>Multi-Session Manager</title>
+    <title>Multi-Session Manager — All Sessions</title>
   </head>
   <body>
-    <!-- Loading state -->
-    <div id="loading" class="loading-screen">
-      <div class="spinner"></div>
-      <p>Loading sessions…</p>
-    </div>
-
-    <!-- Error state (no valid tab) -->
-    <div id="error-screen" class="error-screen hidden">
-      <div class="error-icon">⚠️</div>
-      <p id="error-message">Cannot manage sessions for this page.</p>
-    </div>
-
-    <!-- Main app -->
-    <div id="app" class="hidden">
-      <!-- Header -->
-      <header class="header">
-        <div class="header-content">
-          <div class="site-badge">
-            <span class="site-icon">🌐</span>
-            <span id="site-hostname" class="site-hostname"></span>
-          </div>
-          <button id="btn-manage-all" class="btn btn-ghost btn-sm" title="Manage all sessions across all sites">
-            📂 All Sessions
-          </button>
-          <div class="header-right">
-            <span class="session-count" id="session-count">0 sessions</span>
-            <button id="btn-theme" class="btn-icon-only" title="Toggle theme">🌙</button>
-          </div>
+    <!-- Header -->
+    <header class="header">
+      <div class="header-content">
+        <h1 class="page-title">🌐 All Sessions Manager</h1>
+        <div class="header-right">
+          <input type="text" id="search-input" class="search-input" placeholder="Search hosts or sessions…" />
+          <button id="btn-theme" class="btn-icon-only" title="Toggle theme">🌙</button>
         </div>
-      </header>
+      </div>
+    </header>
 
-      <!-- Session list -->
-      <main class="main">
-        <div id="session-list" class="session-list">
-          <!-- Sessions rendered here -->
-        </div>
+    <!-- Main content -->
+    <main id="main-content" class="main-content">
+      <div id="loading" class="loading-screen">
+        <div class="spinner"></div>
+        <p>Loading all sessions…</p>
+      </div>
 
-        <div id="empty-state" class="empty-state hidden">
-          <div class="empty-icon">📦</div>
-          <p>No sessions saved yet</p>
-          <p class="empty-hint">Capture your current session or add one manually</p>
-        </div>
-      </main>
+      <div id="empty-state" class="empty-state hidden">
+        <div class="empty-icon">📦</div>
+        <p>No sessions saved for any site</p>
+      </div>
 
-      <!-- Action buttons -->
-      <footer class="footer">
-        <button id="btn-capture" class="btn btn-secondary" title="Save current browser cookies as a new session">
-          <span class="btn-icon">📸</span> Capture
-        </button>
-        <button id="btn-add" class="btn btn-primary" title="Manually add a new session">
-          <span class="btn-icon">➕</span> Add
-        </button>
-      </footer>
-    </div>
+      <div id="sites-container" class="sites-container hidden">
+        <!-- Sites rendered here -->
+      </div>
+    </main>
 
     <!-- Add/Edit modal overlay -->
     <div id="modal-overlay" class="modal-overlay hidden">
       <div class="modal">
         <div class="modal-header">
-          <h2 id="modal-title">Add Session</h2>
+          <h2 id="modal-title">Edit Session</h2>
           <button id="btn-modal-close" class="btn-icon-only" title="Close">✕</button>
         </div>
         <form id="session-form" class="session-form">
@@ -98,7 +71,7 @@
           <div id="form-error" class="form-error hidden"></div>
           <div class="form-actions">
             <button type="button" id="btn-cancel" class="btn btn-ghost">Cancel</button>
-            <button type="submit" id="btn-save" class="btn btn-primary">Save Session</button>
+            <button type="submit" id="btn-save" class="btn btn-primary">Save</button>
           </div>
         </form>
       </div>
