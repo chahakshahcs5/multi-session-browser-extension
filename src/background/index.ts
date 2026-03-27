@@ -76,6 +76,49 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   }
 });
 
+// ─── Cookie change: update stored session when cookies change externally ───
+
+let cookieChangeTimer: ReturnType<typeof setTimeout> | null = null;
+
+chrome.cookies.onChanged.addListener((changeInfo) => {
+  // Debounce — cookies often change in batches
+  if (cookieChangeTimer) clearTimeout(cookieChangeTimer);
+  cookieChangeTimer = setTimeout(() => {
+    handleCookieChange(changeInfo.cookie.domain);
+  }, 500);
+});
+
+async function handleCookieChange(changedDomain: string): Promise<void> {
+  try {
+    // Get the active tab
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !tab.url) return;
+
+    let hostname: string;
+    try {
+      hostname = new URL(tab.url).hostname;
+    } catch {
+      return;
+    }
+
+    // Only act if the changed domain matches the active tab's hostname
+    const normalizedDomain = changedDomain.startsWith('.') ? changedDomain.substring(1) : changedDomain;
+    if (!hostname.endsWith(normalizedDomain) && normalizedDomain !== hostname) return;
+
+    // Check if this tab has a mapped session
+    const sessionId = await getTabSession(tab.id, hostname);
+    if (!sessionId) return;
+
+    // Capture the current cookies and update the stored session
+    const storeId = await getStoreIdForTab(tab.id);
+    const currentCookies = await captureCookies(hostname, storeId);
+    const { updateSession } = await import('../services/storage');
+    await updateSession(hostname, sessionId, { cookies: currentCookies });
+  } catch (err) {
+    console.error('Cookie change handler error:', err);
+  }
+}
+
 // ─── Core: handle tab gaining focus ───
 
 async function handleTabFocused(tabId: number): Promise<void> {

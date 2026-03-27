@@ -191,11 +191,7 @@ function renderSessions() {
             }
             <button class="btn btn-copy btn-sm" data-action="copy" data-id="${session.id}" title="Copy cookies to clipboard">📋 Copy</button>
             <button class="btn btn-ghost btn-sm" data-action="edit" data-id="${session.id}">Edit</button>
-            ${
-              isTabActive && isDefault
-                ? '<button class="btn btn-ghost btn-sm" disabled title="Cannot delete: session is both active and default">Delete</button>'
-                : `<button class="btn btn-ghost btn-sm" data-action="delete" data-id="${session.id}">Delete</button>`
-            }
+            <button class="btn btn-ghost btn-sm" data-action="delete" data-id="${session.id}">Delete</button>
           </div>
         </div>
       `;
@@ -434,15 +430,6 @@ function handleDeletePrompt(sessionId: string) {
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) return;
 
-  const isTabActive = sessionId === tabSessionId;
-  const isDefault = sessionId === defaultSessionId;
-
-  // Block deletion of session that is both active + default
-  if (isTabActive && isDefault) {
-    showToast('Cannot delete: session is both active and default');
-    return;
-  }
-
   pendingDeleteId = sessionId;
   $deleteLabel.textContent = session.label;
   $deleteOverlay.classList.remove('hidden');
@@ -455,12 +442,33 @@ async function handleDeleteConfirm() {
   const isTabActive = deletingId === tabSessionId;
   const isDefault = deletingId === defaultSessionId;
 
+  // Find the remaining sessions after deletion
+  const remaining = sessions.filter((s) => s.id !== deletingId);
+
   try {
     // Delete the session
     await deleteSession(currentHostname, deletingId);
 
-    // Rule 1: Deleting active session → default becomes active for this tab
-    if (isTabActive && defaultSessionId && defaultSessionId !== deletingId) {
+    if (isTabActive && isDefault) {
+      // Deleting session that is both active + default
+      // Promote next remaining session to both roles (if any)
+      if (remaining.length > 0) {
+        const next = remaining[0];
+        await chrome.runtime.sendMessage({
+          type: 'SET_DEFAULT_SESSION',
+          hostname: currentHostname,
+          sessionId: next.id,
+        });
+        await chrome.runtime.sendMessage({
+          type: 'SET_TAB_SESSION',
+          tabId: currentTabId,
+          hostname: currentHostname,
+          sessionId: next.id,
+          cookies: next.cookies,
+        });
+      }
+    } else if (isTabActive && defaultSessionId && defaultSessionId !== deletingId) {
+      // Deleting active session → default becomes active for this tab
       const defaultSession = sessions.find((s) => s.id === defaultSessionId);
       if (defaultSession) {
         await chrome.runtime.sendMessage({
@@ -471,10 +479,8 @@ async function handleDeleteConfirm() {
           cookies: defaultSession.cookies,
         });
       }
-    }
-
-    // Rule 2: Deleting default session (not active) → active becomes default
-    if (isDefault && !isTabActive && tabSessionId) {
+    } else if (isDefault && !isTabActive && tabSessionId) {
+      // Deleting default session (not active) → active becomes default
       await chrome.runtime.sendMessage({
         type: 'SET_DEFAULT_SESSION',
         hostname: currentHostname,

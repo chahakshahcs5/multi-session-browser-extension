@@ -22,7 +22,12 @@ A Chrome extension that lets you save, label, and switch between multiple cookie
 ### Delete Rules
 - Deleting the **active** session → the default session takes over for that tab
 - Deleting the **default** session (not active) → the active session becomes the new default
-- A session that is **both active + default** cannot be deleted (must reassign one role first)
+- Deleting a session that is **both active + default** → the next remaining session is promoted to both roles
+
+### Cookie Sync
+- Listens for `chrome.cookies.onChanged` on the active tab
+- When cookies change externally (e.g. website sets new cookies), the stored session is auto-updated
+- Debounced (500ms) to handle batch cookie changes efficiently
 
 ### All Sessions Manager
 - Full-page management UI accessible from the popup header
