@@ -1,4 +1,4 @@
-import type { Session, SiteData } from '../types';
+import type { Session, SiteData, SessionStorage } from '../types';
 
 const STORAGE_KEY = 'multiSessionData';
 
@@ -13,6 +13,48 @@ async function saveAllData(data: Record<string, SiteData>): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: data });
 }
 
+/**
+ * Migrate old session format to new format
+ * Converts old `cookies: CookieEntry[]` format to new `sessionData: SessionStorage` format
+ */
+function migrateSessionFormat(session: Session): Session {
+  // If already migrated (has sessionData), return as-is
+  if (session.sessionData) {
+    return session;
+  }
+
+  // If old cookies field exists, migrate it
+  if (session.cookies) {
+    const newSession: Session = {
+      ...session,
+      sessionData: {
+        cookies: session.cookies,
+        localStorage: [],
+        sessionStorage: [],
+        indexedDB: [],
+        webSQL: [],
+        fileSystem: [],
+      },
+    };
+    // Remove old field
+    delete newSession.cookies;
+    return newSession;
+  }
+
+  // Fallback: create empty sessionData
+  return {
+    ...session,
+    sessionData: {
+      cookies: [],
+      localStorage: [],
+      sessionStorage: [],
+      indexedDB: [],
+      webSQL: [],
+      fileSystem: [],
+    },
+  };
+}
+
 /** Get data for a specific site */
 export async function getSiteData(hostname: string): Promise<SiteData> {
   const all = await getAllData();
@@ -23,6 +65,9 @@ export async function getSiteData(hostname: string): Promise<SiteData> {
     (raw as SiteData).defaultSessionId = (raw as Record<string, unknown>).activeSessionId as string | null;
     delete (raw as Record<string, unknown>).activeSessionId;
   }
+
+  // Migrate each session from old format to new format
+  raw.sessions = raw.sessions.map(session => migrateSessionFormat(session));
 
   // Auto-set default if exactly 1 session and no default set
   if (raw.sessions.length === 1 && !raw.defaultSessionId) {
@@ -48,14 +93,14 @@ function generateId(): string {
 export async function addSession(
   hostname: string,
   label: string,
-  cookies: Session['cookies']
+  sessionData: SessionStorage
 ): Promise<Session> {
   const siteData = await getSiteData(hostname);
   const now = Date.now();
   const session: Session = {
     id: generateId(),
     label,
-    cookies,
+    sessionData,
     createdAt: now,
     updatedAt: now,
   };
@@ -70,18 +115,59 @@ export async function addSession(
   return session;
 }
 
-/** Update an existing session's label and/or cookies */
+/**
+ * Add session from legacy cookies format (for backward compatibility)
+ */
+export async function addSessionFromCookies(
+  hostname: string,
+  label: string,
+  cookies: Session['cookies'] = []
+): Promise<Session> {
+  const sessionData: SessionStorage = {
+    cookies: cookies || [],
+    localStorage: [],
+    sessionStorage: [],
+    indexedDB: [],
+    webSQL: [],
+    fileSystem: [],
+  };
+  return addSession(hostname, label, sessionData);
+}
+
+/** Update an existing session's label and/or session data */
 export async function updateSession(
   hostname: string,
   sessionId: string,
-  updates: { label?: string; cookies?: Session['cookies'] }
+  updates: { label?: string; sessionData?: SessionStorage }
 ): Promise<Session | null> {
   const siteData = await getSiteData(hostname);
   const session = siteData.sessions.find((s) => s.id === sessionId);
   if (!session) return null;
 
   if (updates.label !== undefined) session.label = updates.label;
-  if (updates.cookies !== undefined) session.cookies = updates.cookies;
+  if (updates.sessionData !== undefined) session.sessionData = updates.sessionData;
+  session.updatedAt = Date.now();
+
+  await saveSiteData(hostname, siteData);
+  return session;
+}
+
+/**
+ * Update session with legacy cookies format (for backward compatibility)
+ */
+export async function updateSessionCookies(
+  hostname: string,
+  sessionId: string,
+  cookies: Session['cookies']
+): Promise<Session | null> {
+  const siteData = await getSiteData(hostname);
+  const session = siteData.sessions.find((s) => s.id === sessionId);
+  if (!session) return null;
+
+  session.sessionData = {
+    ...session.sessionData,
+    cookies: cookies || [],
+  };
   session.updatedAt = Date.now();
 
   await saveSiteData(hostname, siteData);

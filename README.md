@@ -1,23 +1,215 @@
 # Multi-Session Extension
 
-A Chrome extension that lets you save, label, and switch between multiple cookie sessions (accounts) per website — with **per-tab session isolation** so each tab runs its own account independently.
+A powerful Chrome extension that lets you save, manage, and switch between multiple complete session profiles across all your websites. Capture and restore **cookies, localStorage, sessionStorage, IndexedDB, and WebSQL** with per-tab isolation and automatic syncing.
 
-## Features
+## ✨ Features
 
-### Core
-- **Session CRUD** — Create, read, update, and delete sessions per site
-- **Capture Current** — Snapshot your browser's current cookies into a new session
-- **Manual Entry** — Add cookies via JSON array/object or `name=value` text format
-- **Copy Cookies** — Copy a session's cookies as JSON to the clipboard
-- **Per-Site Isolation** — Sessions are stored independently per hostname
-- **Persistent Storage** — All data saved in `chrome.storage.local`, survives browser restarts
+### 🔐 Comprehensive Storage Capture
+- **Cookies** — Captures cookies from the main domain + all parent domain levels
+- **localStorage** — Saves and restores local storage for each domain
+- **sessionStorage** — Captures temporary session storage
+- **IndexedDB** — Captures database entries (capture only, restoration  in progress)
+- **WebSQL** — Captures deprecated WebSQL data (capture only, restoration in progress)
+- **Multi-Domain** — Automatically discovers and captures data from all resource domains on the page
 
-### Tab-Level Control
-- **Per-Tab Sessions** — Each tab independently runs its own session for a site
-- **Default Session** — A designated session that is automatically applied to every new tab
-- **Silent Cookie Swap** — When you switch tabs, cookies are swapped automatically *without reloading*
-- **Tab Fallback** — If a tab's mapped session is deleted, it falls back to the default session
-- **New Window / Incognito** — Works across new windows and incognito tabs (`storeId`-aware)
+### 📝 Session Management
+- **Create Sessions** — Manually add sessions with JSON editor or `name=value` format
+- **Capture Current** — Save complete browser state (all storage types) with one click
+- **Edit Sessions** — Tabbed interface for editing each storage type independently
+- **Copy Sessions** — Copy session JSON to clipboard for backup
+- **Delete Sessions** — Remove unwanted sessions
+- **Default Session** — Designate a session to auto-apply to new tabs
+
+### 🔄 Per-Tab Session Isolation
+- **Independent Sessions** — Each tab can run a different session for the same website
+- **Silent Restoration** — Switch tabs and sessions are instantly restored without page reload
+- **Automatic Sync** — Changes to storage are automatically captured every 3 seconds
+- **Fallback Logic** — If a tab's session is deleted, falls back to default
+- **Incognito Support** — Works with incognito/private mode tabs
+
+### ⚡ Performance Optimizations
+- **Parallel Captures** — All frames scanned simultaneously for storage data
+- **Parallel Cookie Queries** — All domains queried in parallel (+10x faster)
+- **Parallel Restore** — Cookies and client storage restored concurrently (+2x faster)
+- **Fast Sync Comparison** — Smart change detection with length checks before deep comparison
+
+### 🎨 UI Features
+- **Popup Interface** — Quick access to current site's sessions from the toolbar
+- **Manage Page** — Full management interface for all saved sessions across all sites
+- **Dark/Light Theme** — Toggle between dark and light modes
+- **Storage Tabs** — Separate tabs for Cookies, localStorage, sessionStorage, IndexedDB, WebSQL
+- **Real-Time Stats** — See count of each storage type captured
+- **Glassmorphism Design** — Modern aesthetic with blur effects
+
+## 🏗️ Architecture
+
+### Services Layer
+- **`storage-capture.ts`** — Captures all session data types in parallel
+  - Multi-frame storage detection
+  - Cross-domain discovery
+  - Parent domain cookie querying
+  - Deduplication logic
+  
+- **`storage-restore.ts`** — Restores session data
+  - Parallel cookie + client storage restoration
+  - Clear-before-restore strategy
+  - Error handling and fallbacks
+
+- **`storage.ts`** — Session persistence
+  - Chrome storage API wrapper
+  - Session CRUD operations
+  - Site-level data management
+  - Default session tracking
+
+- **`tab-session-map.ts`** — Tab to session mapping
+  - Per-tab session association
+  - Stale tab cleanup
+  - Fallback resolution
+
+- **`cookie-parser.ts`** — CLI input parsing
+  - JSON array format: `[{"name":"sid","value":"abc"}]`
+  - Text format: `name=value` (one per line)
+  - Validation and normalization
+
+### Scripts
+
+- **`content.ts`** — Content script injected into web pages
+  - Discovers all page domains from resources (iframes, scripts, images, stylesheets)
+  - Captures localStorage, sessionStorage from all frames
+  - Restores storage on demand
+  - Communication bridge with background script
+
+- **`background/index.ts`** — Service worker
+  - Handles extension lifecycle (install, focus, navigation)
+  - Orchestrates capture/restore operations
+  - Auto-sync polling (3-second interval)
+  - Tab and window focus management
+  - Message routing
+
+### UI
+
+- **`popup/`** — Quick-access popup
+  - Current site sessions
+  - Capture button
+  - Session switching
+  - Session editing with tabbed UI
+  
+- **`manage/`** — Full management page
+  - All sites and sessions
+  - Search functionality
+  - Bulk operations
+  - Same tabbed editing interface
+
+## 📋 Data Structures
+
+### SessionStorage Type
+```typescript
+type SessionStorage = {
+  cookies: CookieEntry[];
+  localStorage: StorageEntry[];
+  sessionStorage: StorageEntry[];
+  indexedDB: IndexedDBEntry[];
+  webSQL: WebSQLEntry[];
+  fileSystem: any[];
+};
+```
+
+### CookieEntry & StorageEntry
+```typescript
+type CookieEntry = chrome.cookies.Cookie;
+type StorageEntry = { key: string; value: string; domain: string };
+```
+
+## 🚀 Usage
+
+### Capturing a Session
+1. Browse to any website and interact with it (login, customize, etc.)
+2. Click the extension icon → **Capture** button
+3. Session saved with site data (cookies, localStorage, sessionStorage)
+
+### Switching Sessions
+1. Via **popup**: Select session from the list
+2. Via **manage page**: Browse all sites and click session card
+3. Cookies and storage instantly restored without page reload
+
+### Editing Sessions
+1. Click edit on any session
+2. Tabs for each storage type (Cookies, localStorage, sessionStorage, IndexedDB, WebSQL)
+3. Edit JSON or text format
+4. Save changes
+
+### Setting Default Session
+1. Right-click a session (or use UI button)
+2. "Set as Default"
+3. Auto-applies to all new tabs for that site
+
+## 🔄 Auto-Sync
+
+The extension continuously monitors active tab storage:
+- **Interval**: Every 3 seconds
+- **Detection**: Smart comparison (check array lengths before deep compare)
+- **Action**: If data changed, automatically updates the session
+- **Benefit**: Manual edits on page are preserved in the session
+
+## 🛠️ Development
+
+### Build
+```bash
+npm run build    # Build all bundles
+npm run dev      # Start dev server
+```
+
+### Project Structure
+```
+src/
+├── background/        # Service worker
+├── popup/             # Popup UI
+├── manage/            # Management page
+├── services/          # Business logic
+│   ├── storage-capture.ts
+│   ├── storage-restore.ts
+│   ├── storage.ts
+│   ├── tab-session-map.ts
+│   └── cookie-parser.ts
+├── types/             # TypeScript definitions
+├── content.ts         # Content script
+└── manifest.json      # Extension manifest
+```
+
+### Key Technologies
+- **TypeScript** — Full type safety
+- **Vite** — Fast bundling and HMR
+- **Chrome Extension APIs** — `chrome.cookies`, `chrome.storage`, `chrome.tabs`, `chrome.webNavigation`
+- **Manifest V3** — Modern extension manifest (auto-transpiled for Firefox MV2)
+
+## 🔐 Security & Privacy
+
+- **All local** — Data stored entirely in `chrome.storage.local` (or Firefox equivalent)
+- **No network** — Extension makes zero external requests
+- **No tracking** — Zero telemetry or user tracking
+- **Source available** — Code is fully available for review
+
+## 📝 Notes
+
+### Limitations
+- **IndexedDB/WebSQL restoration** — Complex transaction logic deferred (capture works fully)
+- **FileSystem API** — Not yet integrated
+- **Domain scope** — Captures limited to main domain + 1 parent level (prevents cross-site pollution)
+
+### Browser Compatibility
+- ✅ Chrome/Chromium 90+
+- ✅ Firefox (with MV2 transpilation)
+- ✅ Edge (Chromium-based)
+- ✅ Brave
+- ✅ Vivaldi
+
+## 📄 License
+
+MIT
+
+---
+
+**Made with ❤️ for power users who manage multiple accounts**
 
 ### Delete Rules
 - Deleting the **active** session → the default session takes over for that tab

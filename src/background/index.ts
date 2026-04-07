@@ -1,5 +1,6 @@
-import type { ExtensionMessage, ActiveTabResponse, CookieEntry } from '../types';
-import { captureCookies, applyCookies, clearCookies, getStoreIdForTab } from '../services/cookies';
+import type { ExtensionMessage, ActiveTabResponse, SessionStorage, StorageStats } from '../types';
+import { captureAllSessionData, getStorageStats } from '../services/storage-capture';
+import { restoreAllSessionData, clearAllSessionData } from '../services/storage-restore';
 import { getSiteData } from '../services/storage';
 import {
   getTabSession,
@@ -12,7 +13,7 @@ console.log('Multi-Session Extension: background service worker started');
 
 // ─── Lifecycle ───
 
-chrome.runtime.onInstalled.addListener((details) => {
+chrome.runtime.onInstalled.addListener((details: any) => {
   console.log('Extension installed:', details.reason);
   cleanupStaleTabs();
 });
@@ -20,9 +21,9 @@ chrome.runtime.onInstalled.addListener((details) => {
 // Clean up stale tabs when the service worker wakes up
 cleanupStaleTabs();
 
-// ─── Tab activation: swap cookies when user focuses a tab ───
+// ─── Tab activation: swap session data when user focuses a tab ───
 
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
+chrome.tabs.onActivated.addListener(async (activeInfo: any) => {
   try {
     await handleTabFocused(activeInfo.tabId);
   } catch (err) {
@@ -30,7 +31,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   }
 });
 
-// ─── Window focus: swap cookies when user switches windows ───
+// ─── Window focus: swap session data when user switches windows ───
 
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
@@ -76,21 +77,48 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   }
 });
 
-// ─── Cookie change: update stored session when cookies change externally ───
+// ─── Auto-sync: periodically capture storage changes ───
 
-let cookieChangeTimer: ReturnType<typeof setTimeout> | null = null;
+// Map to track last captured state per tab+hostname
+const lastCapturedState = new Map<string, SessionStorage>();
 
-chrome.cookies.onChanged.addListener((changeInfo) => {
-  // Debounce — cookies often change in batches
-  if (cookieChangeTimer) clearTimeout(cookieChangeTimer);
-  cookieChangeTimer = setTimeout(() => {
-    handleCookieChange(changeInfo.cookie.domain);
-  }, 500);
+// Poll for storage changes when a tab is active
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+chrome.tabs.onActivated.addListener(() => {
+  // Reset poll timer on tab activation
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(() => {
+    handleAutoSync();
+  }, 3000); // Poll every 3 seconds
 });
 
-async function handleCookieChange(changedDomain: string): Promise<void> {
+chrome.tabs.onRemoved.addListener(() => {
+  if (pollTimer) clearInterval(pollTimer);
+});
+
+/**
+ * Fast comparison of session storage data
+ * Checks array lengths first before doing deep comparison
+ */
+function hasSessionStorageChanged(oldData: SessionStorage, newData: SessionStorage): boolean {
+  // Quick length checks first (very fast)
+  if (
+    oldData.cookies.length !== newData.cookies.length ||
+    oldData.localStorage.length !== newData.localStorage.length ||
+    oldData.sessionStorage.length !== newData.sessionStorage.length ||
+    oldData.indexedDB.length !== newData.indexedDB.length ||
+    oldData.webSQL.length !== newData.webSQL.length
+  ) {
+    return true;
+  }
+
+  // Only do full JSON compare if lengths match (likely means data changed elsewhere)
+  return JSON.stringify(newData) !== JSON.stringify(oldData);
+}
+
+async function handleAutoSync(): Promise<void> {
   try {
-    // Get the active tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !tab.url) return;
 
@@ -101,21 +129,37 @@ async function handleCookieChange(changedDomain: string): Promise<void> {
       return;
     }
 
-    // Only act if the changed domain matches the active tab's hostname
-    const normalizedDomain = changedDomain.startsWith('.') ? changedDomain.substring(1) : changedDomain;
-    if (!hostname.endsWith(normalizedDomain) && normalizedDomain !== hostname) return;
-
-    // Check if this tab has a mapped session
     const sessionId = await getTabSession(tab.id, hostname);
     if (!sessionId) return;
 
-    // Capture the current cookies and update the stored session
     const storeId = await getStoreIdForTab(tab.id);
-    const currentCookies = await captureCookies(hostname, storeId);
-    const { updateSession } = await import('../services/storage');
-    await updateSession(hostname, sessionId, { cookies: currentCookies });
+    const freshData = await captureAllSessionData(hostname, tab.id, storeId);
+    
+    const stateKey = `${tab.id}:${hostname}:${sessionId}`;
+    const lastData = lastCapturedState.get(stateKey);
+
+    // Fast comparison: check if anything changed
+    if (lastData && hasSessionStorageChanged(lastData, freshData)) {
+      const { updateSession } = await import('../services/storage');
+      await updateSession(hostname, sessionId, { sessionData: freshData });
+      lastCapturedState.set(stateKey, freshData);
+    } else if (!lastData) {
+      // Initialize state tracking
+      lastCapturedState.set(stateKey, freshData);
+    }
   } catch (err) {
-    console.error('Cookie change handler error:', err);
+    console.error('Auto-sync handler error:', err);
+  }
+}
+
+// ─── Helper: get store ID for tab ───
+
+async function getStoreIdForTab(tabId: number): Promise<string> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return tab.incognito ? 'firefox-private' : '0';
+  } catch {
+    return '0';
   }
 }
 
@@ -146,11 +190,11 @@ async function handleTabFocused(tabId: number): Promise<void> {
     return;
   }
 
-  // Tab is tracked → silently swap cookies (no reload)
+  // Tab is tracked → silently swap session data (no reload)
   const siteData = await getSiteData(hostname);
   const session = siteData.sessions.find((s) => s.id === sessionId);
   if (session) {
-    await applyCookies(hostname, session.cookies, storeId);
+    await restoreAllSessionData(hostname, tabId, session.sessionData, storeId);
   } else {
     // Mapped session no longer exists → fall back to default
     const fallbackId = await assignDefaultSession(tabId, hostname, storeId);
@@ -181,7 +225,7 @@ async function assignDefaultSession(tabId: number, hostname: string, storeId: st
   if (!session) return null;
 
   await setTabSession(tabId, hostname, sessionId);
-  await applyCookies(hostname, session.cookies, storeId);
+  await restoreAllSessionData(hostname, tabId, session.sessionData, storeId);
   return sessionId;
 }
 
@@ -210,20 +254,22 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
       return handleCaptureCurrent(message.hostname, message.tabId);
 
     case 'SWITCH_SESSION':
-      return handleSwitchSession(message.hostname, message.cookies, message.tabId, message.sessionId);
+      return handleSwitchSession(message.hostname, message.sessionData, message.tabId, message.sessionId);
 
-    case 'CLEAR_COOKIES':
-      await clearCookies(message.hostname);
-      return { success: true };
+    case 'CLEAR_SESSION_DATA':
+      return handleClearSessionData(message.hostname);
 
     case 'GET_TAB_SESSION':
       return handleGetTabSession(message.tabId, message.hostname);
 
     case 'SET_TAB_SESSION':
-      return handleSetTabSession(message.tabId, message.hostname, message.sessionId, message.cookies);
+      return handleSetTabSession(message.tabId, message.hostname, message.sessionId, message.sessionData);
 
     case 'SET_DEFAULT_SESSION':
       return handleSetDefaultSession(message.hostname, message.sessionId);
+
+    case 'GET_STORAGE_STATS':
+      return handleGetStorageStats(message.hostname, message.tabId);
 
     default:
       return { error: 'Unknown message type' };
@@ -247,23 +293,33 @@ async function handleGetActiveTab(): Promise<ActiveTabResponse | { error: string
   }
 }
 
-async function handleCaptureCurrent(hostname: string, tabId: number): Promise<CookieEntry[]> {
+async function handleCaptureCurrent(hostname: string, tabId: number): Promise<SessionStorage> {
   const storeId = await getStoreIdForTab(tabId);
-  return captureCookies(hostname, storeId);
+  return captureAllSessionData(hostname, tabId, storeId);
 }
 
 async function handleSwitchSession(
   hostname: string,
-  cookies: CookieEntry[],
+  sessionData: SessionStorage,
   tabId: number,
   sessionId: string
 ): Promise<{ success: boolean }> {
   const storeId = await getStoreIdForTab(tabId);
   // Map session to this tab
   await setTabSession(tabId, hostname, sessionId);
-  // Apply cookies and reload
-  await applyCookies(hostname, cookies, storeId);
+  // Restore session data and reload
+  await restoreAllSessionData(hostname, tabId, sessionData, storeId);
   await chrome.tabs.reload(tabId);
+  return { success: true };
+}
+
+async function handleClearSessionData(hostname: string): Promise<{ success: boolean }> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    return { success: false };
+  }
+  const storeId = await getStoreIdForTab(tab.id);
+  await clearAllSessionData(hostname, tab.id, storeId);
   return { success: true };
 }
 
@@ -279,20 +335,26 @@ async function handleSetTabSession(
   tabId: number,
   hostname: string,
   sessionId: string,
-  cookies: CookieEntry[]
+  sessionData: SessionStorage
 ): Promise<{ success: boolean }> {
   const storeId = await getStoreIdForTab(tabId);
   await setTabSession(tabId, hostname, sessionId);
-  await applyCookies(hostname, cookies, storeId);
+  await restoreAllSessionData(hostname, tabId, sessionData, storeId);
   await chrome.tabs.reload(tabId);
   return { success: true };
 }
 
 async function handleSetDefaultSession(
   hostname: string,
-  sessionId: string
+  sessionId: string | null
 ): Promise<{ success: boolean }> {
   const { setDefaultSession } = await import('../services/storage');
   await setDefaultSession(hostname, sessionId);
   return { success: true };
+}
+
+async function handleGetStorageStats(hostname: string, tabId: number): Promise<StorageStats> {
+  const storeId = await getStoreIdForTab(tabId);
+  const sessionData = await captureAllSessionData(hostname, tabId, storeId);
+  return getStorageStats(sessionData);
 }

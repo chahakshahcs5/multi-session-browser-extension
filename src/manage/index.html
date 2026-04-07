@@ -1,97 +1,151 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css" />
-    <script type="module" src="./index.ts"></script>
-    <title>Multi-Session Manager — All Sessions</title>
-  </head>
-  <body>
-    <!-- Header -->
-    <header class="header">
-      <div class="header-content">
-        <h1 class="page-title">🌐 All Sessions Manager</h1>
-        <div class="header-right">
-          <input type="text" id="search-input" class="search-input" placeholder="Search hosts or sessions…" />
-          <button id="btn-theme" class="btn-icon-only" title="Toggle theme">🌙</button>
-        </div>
-      </div>
-    </header>
 
-    <!-- Main content -->
-    <main id="main-content" class="main-content">
-      <div id="loading" class="loading-screen">
-        <div class="spinner"></div>
-        <p>Loading all sessions…</p>
-      </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script type="module" src="./index.ts"></script>
+  <title>Multi-Session Manager — All Sessions</title>
+</head>
 
-      <div id="empty-state" class="empty-state hidden">
-        <div class="empty-icon">📦</div>
-        <p>No sessions saved for any site</p>
-      </div>
-
-      <div id="sites-container" class="sites-container hidden">
-        <!-- Sites rendered here -->
-      </div>
-    </main>
-
-    <!-- Add/Edit modal overlay -->
-    <div id="modal-overlay" class="modal-overlay hidden">
-      <div class="modal">
-        <div class="modal-header">
-          <h2 id="modal-title">Edit Session</h2>
-          <button id="btn-modal-close" class="btn-icon-only" title="Close">✕</button>
-        </div>
-        <form id="session-form" class="session-form">
-          <div class="form-group">
-            <label for="input-label">Session Label</label>
-            <input
-              type="text"
-              id="input-label"
-              placeholder="e.g. Work Account, Personal…"
-              required
-              autocomplete="off"
-            />
-          </div>
-          <div class="form-group">
-            <label for="input-cookies">
-              Cookies
-              <span class="label-hint">(JSON array or name=value per line)</span>
-            </label>
-            <textarea
-              id="input-cookies"
-              placeholder='[{"name":"sid","value":"abc123"}]&#10;or&#10;sid=abc123&#10;token=xyz'
-              rows="8"
-            ></textarea>
-          </div>
-          <div id="form-error" class="form-error hidden"></div>
-          <div class="form-actions">
-            <button type="button" id="btn-cancel" class="btn btn-ghost">Cancel</button>
-            <button type="submit" id="btn-save" class="btn btn-primary">Save</button>
-          </div>
-        </form>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-content">
+      <h1 class="page-title">🌐 All Sessions Manager</h1>
+      <div class="header-right">
+        <input type="text" id="search-input" class="search-input" placeholder="Search hosts or sessions…" />
+        <button id="btn-theme" class="btn-icon-only" title="Toggle theme">🌙</button>
       </div>
     </div>
+  </header>
 
-    <!-- Delete confirmation -->
-    <div id="delete-overlay" class="modal-overlay hidden">
-      <div class="modal modal-sm">
-        <div class="modal-header">
-          <h2>Delete Session</h2>
+  <!-- Main content -->
+  <main id="main-content" class="main-content">
+    <div id="loading" class="loading-screen">
+      <div class="spinner"></div>
+      <p>Loading all sessions…</p>
+    </div>
+
+    <div id="empty-state" class="empty-state hidden">
+      <div class="empty-icon">📦</div>
+      <p>No sessions saved for any site</p>
+    </div>
+
+    <div id="sites-container" class="sites-container hidden">
+      <!-- Sites rendered here -->
+    </div>
+  </main>
+
+  <!-- Add/Edit modal overlay -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-title">Edit Session</h2>
+        <button id="btn-modal-close" class="btn-icon-only" title="Close">✕</button>
+      </div>
+      <form id="session-form" class="session-form">
+        <div class="form-group">
+          <label for="input-label">Session Label</label>
+          <input type="text" id="input-label" placeholder="e.g. Work Account, Personal…" required autocomplete="off" />
         </div>
-        <p class="confirm-text">Are you sure you want to delete "<span id="delete-label"></span>"?</p>
+        <!-- Storage Tabs -->
+        <div class="storage-tabs">
+          <div class="tabs-header">
+            <button type="button" class="tab-btn active" data-tab="cookies">🍪 Cookies</button>
+            <button type="button" class="tab-btn" data-tab="localStorage">📦 localStorage</button>
+            <button type="button" class="tab-btn" data-tab="sessionStorage">💾 sessionStorage</button>
+            <button type="button" class="tab-btn" data-tab="indexedDB">🗄️ IndexedDB</button>
+            <button type="button" class="tab-btn" data-tab="webSQL">📊 WebSQL</button>
+          </div>
+
+          <div class="tabs-content">
+            <div id="tab-cookies" class="tab-pane active">
+              <div class="form-group">
+                <label for="input-cookies">
+                  Cookies
+                  <span class="label-hint">(JSON array or name=value per line)</span>
+                </label>
+                <textarea id="input-cookies"
+                  placeholder='[{"name":"sid","value":"abc123"}]&#10;or&#10;sid=abc123&#10;token=xyz'
+                  rows="8"></textarea>
+              </div>
+            </div>
+
+            <div id="tab-localStorage" class="tab-pane hidden">
+              <div class="form-group">
+                <label for="input-localStorage">
+                  localStorage
+                  <span class="label-hint">(JSON array)</span>
+                </label>
+                <textarea id="input-localStorage" placeholder='[{"key":"user_id","value":"123","domain":"example.com"}]'
+                  rows="8"></textarea>
+              </div>
+            </div>
+
+            <div id="tab-sessionStorage" class="tab-pane hidden">
+              <div class="form-group">
+                <label for="input-sessionStorage">
+                  sessionStorage
+                  <span class="label-hint">(JSON array)</span>
+                </label>
+                <textarea id="input-sessionStorage"
+                  placeholder='[{"key":"temp_data","value":"value","domain":"example.com"}]' rows="8"></textarea>
+              </div>
+            </div>
+
+            <div id="tab-indexedDB" class="tab-pane hidden">
+              <div class="form-group">
+                <label for="input-indexedDB">
+                  IndexedDB
+                  <span class="label-hint">(JSON array)</span>
+                </label>
+                <textarea id="input-indexedDB" placeholder='[{"database":"mydb","domain":"example.com","stores":[]}]'
+                  rows="8"></textarea>
+              </div>
+            </div>
+
+            <div id="tab-webSQL" class="tab-pane hidden">
+              <div class="form-group">
+                <label for="input-webSQL">
+                  WebSQL
+                  <span class="label-hint">(JSON array)</span>
+                </label>
+                <textarea id="input-webSQL" placeholder='[{"database":"mydb","domain":"example.com","tables":[]}]'
+                  rows="8"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="form-error" class="form-error hidden"></div>
         <div class="form-actions">
-          <button id="btn-delete-cancel" class="btn btn-ghost">Cancel</button>
-          <button id="btn-delete-confirm" class="btn btn-danger">Delete</button>
+          <button type="button" id="btn-cancel" class="btn btn-ghost">Cancel</button>
+          <button type="submit" id="btn-save" class="btn btn-primary">Save</button>
         </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Delete confirmation -->
+  <div id="delete-overlay" class="modal-overlay hidden">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h2>Delete Session</h2>
+      </div>
+      <p class="confirm-text">Are you sure you want to delete "<span id="delete-label"></span>"?</p>
+      <div class="form-actions">
+        <button id="btn-delete-cancel" class="btn btn-ghost">Cancel</button>
+        <button id="btn-delete-confirm" class="btn btn-danger">Delete</button>
       </div>
     </div>
+  </div>
 
-    <!-- Toast notification -->
-    <div id="toast" class="toast hidden">Copied!</div>
-  </body>
+  <!-- Toast notification -->
+  <div id="toast" class="toast hidden">Copied!</div>
+</body>
+
 </html>

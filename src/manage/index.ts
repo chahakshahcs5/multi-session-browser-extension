@@ -1,6 +1,7 @@
-import type { CookieEntry, SiteData } from '../types';
+import type { SessionStorage, SiteData } from '../types';
 import { getSiteData, addSession, updateSession, deleteSession, setDefaultSession, getAllSites } from '../services/storage';
 import { parseCookieInput } from '../services/cookie-parser';
+import { getStorageStats } from '../services/storage-capture';
 
 // ─── State ───
 let allSitesData: Record<string, SiteData> = {};
@@ -21,6 +22,12 @@ const $modalTitle = document.getElementById('modal-title')!;
 const $sessionForm = document.getElementById('session-form')! as HTMLFormElement;
 const $inputLabel = document.getElementById('input-label')! as HTMLInputElement;
 const $inputCookies = document.getElementById('input-cookies')! as HTMLTextAreaElement;
+const $inputLocalStorage = document.getElementById('input-localStorage')! as HTMLTextAreaElement;
+const $inputSessionStorage = document.getElementById('input-sessionStorage')! as HTMLTextAreaElement;
+const $inputIndexedDB = document.getElementById('input-indexedDB')! as HTMLTextAreaElement;
+const $inputWebSQL = document.getElementById('input-webSQL')! as HTMLTextAreaElement;
+const $tabButtons = document.querySelectorAll('.tab-btn') as NodeListOf<HTMLButtonElement>;
+const $tabPanes = document.querySelectorAll('.tab-pane') as NodeListOf<HTMLElement>;
 const $formError = document.getElementById('form-error')!;
 const $btnCancel = document.getElementById('btn-cancel')!;
 const $btnModalClose = document.getElementById('btn-modal-close')!;
@@ -154,13 +161,23 @@ function renderAll() {
 
       const sessionCards = sessions.map((session) => {
         const isDefault = session.id === siteData.defaultSessionId;
-        const cookieCount = session.cookies.length;
+        const stats = getStorageStats(session.sessionData);
         const updatedAt = new Date(session.updatedAt).toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric',
           hour: '2-digit',
           minute: '2-digit',
         });
+
+        // Build storage summary
+        const storageSummary: string[] = [];
+        if (stats.cookies > 0) storageSummary.push(`🍪 ${stats.cookies}`);
+        if (stats.localStorage > 0) storageSummary.push(`📦 ${stats.localStorage}`);
+        if (stats.sessionStorage > 0) storageSummary.push(`💾 ${stats.sessionStorage}`);
+        if (stats.indexedDB > 0) storageSummary.push(`🗄️ ${stats.indexedDB}`);
+        if (stats.webSQL > 0) storageSummary.push(`📊 ${stats.webSQL}`);
+        
+        const storageText = storageSummary.length > 0 ? storageSummary.join(' ') : 'No storage';
 
         return `
           <div class="session-card ${isDefault ? 'default' : ''}" data-hostname="${hostname}" data-id="${session.id}">
@@ -170,7 +187,7 @@ function renderAll() {
                 ${isDefault ? '<span class="default-badge">Default</span>' : ''}
               </span>
             </div>
-            <div class="session-meta">${cookieCount} cookie${cookieCount !== 1 ? 's' : ''} · ${updatedAt}</div>
+            <div class="session-meta">${storageText} · ${updatedAt}</div>
             <div class="session-actions">
               ${
                 isDefault
@@ -274,6 +291,14 @@ $modalOverlay.addEventListener('click', (e) => {
   if (e.target === $modalOverlay) closeModal();
 });
 
+// Storage tab switching
+$tabButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const tabName = btn.getAttribute('data-tab');
+    if (tabName) showTab(tabName);
+  });
+});
+
 $sessionForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   await handleSave();
@@ -306,8 +331,13 @@ function handleEdit(hostname: string, sessionId: string) {
   editingContext = { hostname, sessionId };
   $modalTitle.textContent = `Edit Session — ${hostname}`;
   $inputLabel.value = session.label;
-  $inputCookies.value = JSON.stringify(session.cookies, null, 2);
+  $inputCookies.value = JSON.stringify(session.sessionData.cookies, null, 2);
+  $inputLocalStorage.value = JSON.stringify(session.sessionData.localStorage, null, 2);
+  $inputSessionStorage.value = JSON.stringify(session.sessionData.sessionStorage, null, 2);
+  $inputIndexedDB.value = JSON.stringify(session.sessionData.indexedDB, null, 2);
+  $inputWebSQL.value = JSON.stringify(session.sessionData.webSQL, null, 2);
   $formError.classList.add('hidden');
+  showTab('cookies');
   $modalOverlay.classList.remove('hidden');
   $inputLabel.focus();
 }
@@ -317,6 +347,10 @@ async function handleSave() {
 
   const label = $inputLabel.value.trim();
   const cookieText = $inputCookies.value.trim();
+  const localStorageText = $inputLocalStorage.value.trim();
+  const sessionStorageText = $inputSessionStorage.value.trim();
+  const indexedDBText = $inputIndexedDB.value.trim();
+  const webSQLText = $inputWebSQL.value.trim();
   const { hostname, sessionId } = editingContext;
 
   if (!label) {
@@ -324,21 +358,83 @@ async function handleSave() {
     return;
   }
 
-  let cookies: CookieEntry[] = [];
+  let sessionData: SessionStorage = {
+    cookies: [],
+    localStorage: [],
+    sessionStorage: [],
+    indexedDB: [],
+    webSQL: [],
+    fileSystem: [],
+  };
+
+  // Parse Cookies
   if (cookieText) {
     try {
-      cookies = parseCookieInput(cookieText, hostname);
+      const cookies = parseCookieInput(cookieText, hostname);
+      sessionData.cookies = cookies;
     } catch (err) {
       showFormError(`Invalid cookie format: ${(err as Error).message}`);
       return;
     }
   }
 
+  // Parse localStorage
+  if (localStorageText) {
+    try {
+      sessionData.localStorage = JSON.parse(localStorageText);
+      if (!Array.isArray(sessionData.localStorage)) {
+        throw new Error('Must be a JSON array');
+      }
+    } catch (err) {
+      showFormError(`Invalid localStorage format: ${(err as Error).message}`);
+      return;
+    }
+  }
+
+  // Parse sessionStorage
+  if (sessionStorageText) {
+    try {
+      sessionData.sessionStorage = JSON.parse(sessionStorageText);
+      if (!Array.isArray(sessionData.sessionStorage)) {
+        throw new Error('Must be a JSON array');
+      }
+    } catch (err) {
+      showFormError(`Invalid sessionStorage format: ${(err as Error).message}`);
+      return;
+    }
+  }
+
+  // Parse IndexedDB
+  if (indexedDBText) {
+    try {
+      sessionData.indexedDB = JSON.parse(indexedDBText);
+      if (!Array.isArray(sessionData.indexedDB)) {
+        throw new Error('Must be a JSON array');
+      }
+    } catch (err) {
+      showFormError(`Invalid IndexedDB format: ${(err as Error).message}`);
+      return;
+    }
+  }
+
+  // Parse WebSQL
+  if (webSQLText) {
+    try {
+      sessionData.webSQL = JSON.parse(webSQLText);
+      if (!Array.isArray(sessionData.webSQL)) {
+        throw new Error('Must be a JSON array');
+      }
+    } catch (err) {
+      showFormError(`Invalid WebSQL format: ${(err as Error).message}`);
+      return;
+    }
+  }
+
   try {
     if (sessionId) {
-      await updateSession(hostname, sessionId, { label, cookies });
+      await updateSession(hostname, sessionId, { label, sessionData });
     } else {
-      await addSession(hostname, label, cookies);
+      await addSession(hostname, label, sessionData);
     }
     closeModal();
     await loadAllData();
@@ -364,9 +460,11 @@ async function handleCopy(hostname: string, sessionId: string) {
   if (!session) return;
 
   try {
-    const json = JSON.stringify(session.cookies, null, 2);
+    const json = JSON.stringify(session.sessionData, null, 2);
     await navigator.clipboard.writeText(json);
-    showToast(`Copied ${session.cookies.length} cookies`);
+    const stats = getStorageStats(session.sessionData);
+    const total = stats.cookies + stats.localStorage + stats.sessionStorage + stats.indexedDB + stats.webSQL;
+    showToast(`Copied ${total} storage items`);
   } catch {
     showToast('Failed to copy');
   }
@@ -400,11 +498,36 @@ async function handleDeleteConfirm() {
 
 // ─── UI helpers ───
 
+function showTab(tabName: string) {
+  // Hide all tabs
+  $tabPanes.forEach((pane) => {
+    pane.classList.add('hidden');
+  });
+
+  // Remove active class from all buttons
+  $tabButtons.forEach((btn) => {
+    btn.classList.remove('active');
+  });
+
+  // Show selected tab
+  const selectedPane = document.getElementById(`tab-${tabName}`);
+  if (selectedPane) {
+    selectedPane.classList.remove('hidden');
+  }
+
+  // Activate selected button
+  const selectedBtn = document.querySelector(`[data-tab="${tabName}"]`) as HTMLButtonElement | null;
+  if (selectedBtn) {
+    selectedBtn.classList.add('active');
+  }
+}
+
 function closeModal() {
   $modalOverlay.classList.add('hidden');
   editingContext = null;
   $sessionForm.reset();
   $formError.classList.add('hidden');
+  showTab('cookies'); // Reset to cookies tab
 }
 
 function closeDeleteDialog() {
