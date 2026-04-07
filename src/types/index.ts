@@ -69,10 +69,21 @@ export interface SessionStorage {
   fileSystem: FileSystemEntry[];
 }
 
+/** Flags for which storage types are enabled for a session */
+export interface EnabledStorageTypes {
+  cookies: boolean;
+  localStorage: boolean;
+  sessionStorage: boolean;
+  indexedDB: boolean;
+  webSQL: boolean;
+}
+
 /** A saved session (account) for a site */
 export interface Session {
   id: string;
   label: string;
+  /** Which storage types are enabled for this session */
+  enabledStorageTypes: EnabledStorageTypes;
   /** Main session data containing all storage types */
   sessionData: SessionStorage;
   /** Legacy field for backward compatibility - will be auto-migrated */
@@ -116,6 +127,7 @@ export interface CaptureCurrentMessage {
   type: 'CAPTURE_CURRENT';
   hostname: string;
   tabId: number;
+  enabledStorageTypes?: EnabledStorageTypes;
 }
 
 export interface SwitchSessionMessage {

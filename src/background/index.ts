@@ -132,16 +132,30 @@ async function handleAutoSync(): Promise<void> {
     const sessionId = await getTabSession(tab.id, hostname);
     if (!sessionId) return;
 
+    // Get the session to check enabled storage types
+    const siteData = await getSiteData(hostname);
+    const session = siteData.sessions.find((s) => s.id === sessionId);
+    if (!session) return;
+
+    // Get enabled storage types for this session (default to all if not set)
+    const enabledStorageTypes = session.enabledStorageTypes || {
+      cookies: true,
+      localStorage: true,
+      sessionStorage: true,
+      indexedDB: true,
+      webSQL: true,
+    };
+
     const storeId = await getStoreIdForTab(tab.id);
-    const freshData = await captureAllSessionData(hostname, tab.id, storeId);
+    const freshData = await captureAllSessionData(hostname, tab.id, storeId, enabledStorageTypes);
     
     const stateKey = `${tab.id}:${hostname}:${sessionId}`;
     const lastData = lastCapturedState.get(stateKey);
 
     // Fast comparison: check if anything changed
     if (lastData && hasSessionStorageChanged(lastData, freshData)) {
-      const { updateSession } = await import('../services/storage');
-      await updateSession(hostname, sessionId, { sessionData: freshData });
+      const { updateSession: updateSessionFn } = await import('../services/storage');
+      await updateSessionFn(hostname, sessionId, { sessionData: freshData });
       lastCapturedState.set(stateKey, freshData);
     } else if (!lastData) {
       // Initialize state tracking
@@ -251,7 +265,7 @@ async function handleMessage(message: ExtensionMessage): Promise<unknown> {
       return handleGetActiveTab();
 
     case 'CAPTURE_CURRENT':
-      return handleCaptureCurrent(message.hostname, message.tabId);
+      return handleCaptureCurrent(message.hostname, message.tabId, message.enabledStorageTypes);
 
     case 'SWITCH_SESSION':
       return handleSwitchSession(message.hostname, message.sessionData, message.tabId, message.sessionId);
@@ -293,9 +307,9 @@ async function handleGetActiveTab(): Promise<ActiveTabResponse | { error: string
   }
 }
 
-async function handleCaptureCurrent(hostname: string, tabId: number): Promise<SessionStorage> {
+async function handleCaptureCurrent(hostname: string, tabId: number, enabledStorageTypes?: any): Promise<SessionStorage> {
   const storeId = await getStoreIdForTab(tabId);
-  return captureAllSessionData(hostname, tabId, storeId);
+  return captureAllSessionData(hostname, tabId, storeId, enabledStorageTypes);
 }
 
 async function handleSwitchSession(
@@ -305,9 +319,15 @@ async function handleSwitchSession(
   sessionId: string
 ): Promise<{ success: boolean }> {
   const storeId = await getStoreIdForTab(tabId);
+  
+  // Clear all session data first to ensure clean switch
+  // (removes data from previous session that might not be in new session)
+  await clearAllSessionData(hostname, tabId, storeId);
+  
   // Map session to this tab
   await setTabSession(tabId, hostname, sessionId);
-  // Restore session data and reload
+  
+  // Restore only the new session's data
   await restoreAllSessionData(hostname, tabId, sessionData, storeId);
   await chrome.tabs.reload(tabId);
   return { success: true };

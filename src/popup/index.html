@@ -80,6 +80,34 @@
           <label for="input-label">Session Label</label>
           <input type="text" id="input-label" placeholder="e.g. Work Account, Personal…" required autocomplete="off" />
         </div>
+
+        <!-- Storage Type Selection -->
+        <div class="form-group">
+          <label>Storage Types to Manage</label>
+          <div class="storage-type-selector">
+            <label class="storage-checkbox">
+              <input type="checkbox" name="storage-type" value="cookies" checked />
+              <span class="checkbox-label">🍪 Cookies</span>
+            </label>
+            <label class="storage-checkbox">
+              <input type="checkbox" name="storage-type" value="localStorage" checked />
+              <span class="checkbox-label">📦 localStorage</span>
+            </label>
+            <label class="storage-checkbox">
+              <input type="checkbox" name="storage-type" value="sessionStorage" checked />
+              <span class="checkbox-label">💾 sessionStorage</span>
+            </label>
+            <label class="storage-checkbox">
+              <input type="checkbox" name="storage-type" value="indexedDB" checked />
+              <span class="checkbox-label">🗄️ IndexedDB</span>
+            </label>
+            <label class="storage-checkbox">
+              <input type="checkbox" name="storage-type" value="webSQL" checked />
+              <span class="checkbox-label">📊 WebSQL</span>
+            </label>
+          </div>
+        </div>
+
         <!-- Storage Tabs -->
         <div class="storage-tabs">
           <div class="tabs-header">
@@ -168,6 +196,42 @@
       <div class="form-actions">
         <button id="btn-delete-cancel" class="btn btn-ghost">Cancel</button>
         <button id="btn-delete-confirm" class="btn btn-danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Capture dialog -->
+  <div id="capture-overlay" class="modal-overlay hidden">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h2>Capture Session Data</h2>
+      </div>
+      <p class="confirm-text">Select which storage types to capture:</p>
+      <div class="storage-type-selector capture-selector">
+        <label class="storage-checkbox">
+          <input type="checkbox" name="capture-type" value="cookies" checked />
+          <span class="checkbox-label">🍪 Cookies</span>
+        </label>
+        <label class="storage-checkbox">
+          <input type="checkbox" name="capture-type" value="localStorage" checked />
+          <span class="checkbox-label">📦 localStorage</span>
+        </label>
+        <label class="storage-checkbox">
+          <input type="checkbox" name="capture-type" value="sessionStorage" checked />
+          <span class="checkbox-label">💾 sessionStorage</span>
+        </label>
+        <label class="storage-checkbox">
+          <input type="checkbox" name="capture-type" value="indexedDB" checked />
+          <span class="checkbox-label">🗄️ IndexedDB</span>
+        </label>
+        <label class="storage-checkbox">
+          <input type="checkbox" name="capture-type" value="webSQL" checked />
+          <span class="checkbox-label">📊 WebSQL</span>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button id="btn-capture-cancel" class="btn btn-ghost">Cancel</button>
+        <button id="btn-capture-confirm" class="btn btn-primary">Capture</button>
       </div>
     </div>
   </div>

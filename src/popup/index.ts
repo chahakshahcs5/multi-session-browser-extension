@@ -10,6 +10,8 @@ let sessions: Session[] = [];
 let defaultSessionId: string | null = null;
 let tabSessionId: string | null = null; // session mapped to CURRENT tab
 let editingSessionId: string | null = null; // null = adding new
+let pendingDeleteId: string | null = null;
+let capturePending = false;
 
 // ─── DOM refs ───
 const $loading = document.getElementById('loading')!;
@@ -31,6 +33,7 @@ const $modalOverlay = document.getElementById('modal-overlay')!;
 const $modalTitle = document.getElementById('modal-title')!;
 const $sessionForm = document.getElementById('session-form')! as HTMLFormElement;
 const $inputLabel = document.getElementById('input-label')! as HTMLInputElement;
+const $storageTypeCheckboxes = document.querySelectorAll('input[name="storage-type"]') as NodeListOf<HTMLInputElement>;
 const $inputCookies = document.getElementById('input-cookies')! as HTMLTextAreaElement;
 const $inputLocalStorage = document.getElementById('input-localStorage')! as HTMLTextAreaElement;
 const $inputSessionStorage = document.getElementById('input-sessionStorage')! as HTMLTextAreaElement;
@@ -47,9 +50,12 @@ const $deleteLabel = document.getElementById('delete-label')!;
 const $btnDeleteCancel = document.getElementById('btn-delete-cancel')!;
 const $btnDeleteConfirm = document.getElementById('btn-delete-confirm')!;
 
-const $toast = document.getElementById('toast')!;
+const $captureOverlay = document.getElementById('capture-overlay')!;
+const $captureTypeCheckboxes = document.querySelectorAll('input[name="capture-type"]') as NodeListOf<HTMLInputElement>;
+const $btnCaptureCancel = document.getElementById('btn-capture-cancel')!;
+const $btnCaptureConfirm = document.getElementById('btn-capture-confirm')!;
 
-let pendingDeleteId: string | null = null;
+const $toast = document.getElementById('toast')!;
 
 // ─── Theme ───
 const THEME_KEY = 'multiSessionTheme';
@@ -307,45 +313,18 @@ $deleteOverlay.addEventListener('click', (e) => {
   if (e.target === $deleteOverlay) closeDeleteDialog();
 });
 
+// Capture dialog
+$btnCaptureCancel.addEventListener('click', closeCaptureDialog);
+$btnCaptureConfirm.addEventListener('click', handleCaptureConfirm);
+$captureOverlay.addEventListener('click', (e) => {
+  if (e.target === $captureOverlay) closeCaptureDialog();
+});
+
 // ─── Handlers ───
 
 async function handleCapture() {
-  $btnCapture.setAttribute('disabled', '');
-  try {
-    const sessionData: SessionStorage = await chrome.runtime.sendMessage({
-      type: 'CAPTURE_CURRENT',
-      hostname: currentHostname,
-      tabId: currentTabId,
-    });
-
-    const stats = getStorageStats(sessionData);
-    const totalItems = stats.cookies + stats.localStorage + stats.sessionStorage + stats.indexedDB + stats.webSQL;
-
-    if (totalItems === 0) {
-      showToast('No session data found for this site');
-      return;
-    }
-
-    const label = `Session ${sessions.length + 1}`;
-    const session = await addSession(currentHostname, label, sessionData);
-
-    // Map the captured session to this tab
-    await chrome.runtime.sendMessage({
-      type: 'SET_TAB_SESSION',
-      tabId: currentTabId,
-      hostname: currentHostname,
-      sessionId: session.id,
-      sessionData: session.sessionData,
-    });
-
-    await loadSessions();
-    showToast(`Captured ${totalItems} storage items`);
-  } catch (err) {
-    console.error('Capture failed:', err);
-    showToast('Failed to capture session data');
-  } finally {
-    $btnCapture.removeAttribute('disabled');
-  }
+  capturePending = true;
+  $captureOverlay.classList.remove('hidden');
 }
 
 async function handleSwitch(sessionId: string) {
@@ -425,6 +404,20 @@ function handleEdit(sessionId: string) {
   editingSessionId = sessionId;
   $modalTitle.textContent = 'Edit Session';
   $inputLabel.value = session.label;
+  
+  // Set the storage type checkboxes based on enabledStorageTypes
+  const enabled = session.enabledStorageTypes || {
+    cookies: true,
+    localStorage: true,
+    sessionStorage: true,
+    indexedDB: true,
+    webSQL: true,
+  };
+  
+  $storageTypeCheckboxes.forEach((checkbox) => {
+    checkbox.checked = enabled[checkbox.value as keyof typeof enabled] ?? true;
+  });
+  
   $inputCookies.value = JSON.stringify(session.sessionData.cookies, null, 2);
   $inputLocalStorage.value = JSON.stringify(session.sessionData.localStorage, null, 2);
   $inputSessionStorage.value = JSON.stringify(session.sessionData.sessionStorage, null, 2);
@@ -438,6 +431,22 @@ function handleEdit(sessionId: string) {
 
 async function handleSave() {
   const label = $inputLabel.value.trim();
+  
+  // Collect enabled storage types from checkboxes
+  const enabledStorageTypes: any = {
+    cookies: false,
+    localStorage: false,
+    sessionStorage: false,
+    indexedDB: false,
+    webSQL: false,
+  };
+  
+  $storageTypeCheckboxes.forEach((checkbox) => {
+    if (checkbox.checked) {
+      enabledStorageTypes[checkbox.value] = true;
+    }
+  });
+  
   const cookieText = $inputCookies.value.trim();
   const localStorageText = $inputLocalStorage.value.trim();
   const sessionStorageText = $inputSessionStorage.value.trim();
@@ -523,9 +532,9 @@ async function handleSave() {
 
   try {
     if (editingSessionId) {
-      await updateSession(currentHostname, editingSessionId, { label, sessionData });
+      await updateSession(currentHostname, editingSessionId, { label, enabledStorageTypes, sessionData });
     } else {
-      await addSession(currentHostname, label, sessionData);
+      await addSession(currentHostname, label, sessionData, enabledStorageTypes);
     }
     closeModal();
     await loadSessions();
@@ -641,6 +650,70 @@ function closeModal() {
 function closeDeleteDialog() {
   $deleteOverlay.classList.add('hidden');
   pendingDeleteId = null;
+}
+
+function closeCaptureDialog() {
+  $captureOverlay.classList.add('hidden');
+  capturePending = false;
+}
+
+async function handleCaptureConfirm() {
+  if (!capturePending) return;
+
+  $btnCaptureConfirm.setAttribute('disabled', '');
+  try {
+    // Collect enabled storage types from checkboxes
+    const enabledStorageTypes: any = {
+      cookies: false,
+      localStorage: false,
+      sessionStorage: false,
+      indexedDB: false,
+      webSQL: false,
+    };
+
+    $captureTypeCheckboxes.forEach((checkbox) => {
+      if (checkbox.checked) {
+        enabledStorageTypes[checkbox.value] = true;
+      }
+    });
+
+    const sessionData: SessionStorage = await chrome.runtime.sendMessage({
+      type: 'CAPTURE_CURRENT',
+      hostname: currentHostname,
+      tabId: currentTabId,
+      enabledStorageTypes,
+    });
+
+    const stats = getStorageStats(sessionData);
+    const totalItems = stats.cookies + stats.localStorage + stats.sessionStorage + stats.indexedDB + stats.webSQL;
+
+    if (totalItems === 0) {
+      showToast('No session data found for this site');
+      closeCaptureDialog();
+      return;
+    }
+
+    const label = `Session ${sessions.length + 1}`;
+    const session = await addSession(currentHostname, label, sessionData, enabledStorageTypes);
+
+    // Map the captured session to this tab
+    await chrome.runtime.sendMessage({
+      type: 'SET_TAB_SESSION',
+      tabId: currentTabId,
+      hostname: currentHostname,
+      sessionId: session.id,
+      sessionData: session.sessionData,
+    });
+
+    closeCaptureDialog();
+    await loadSessions();
+    showToast(`Captured ${totalItems} storage items`);
+  } catch (err) {
+    console.error('Capture failed:', err);
+    showToast('Failed to capture session data');
+  } finally {
+    $btnCaptureConfirm.removeAttribute('disabled');
+  }
 }
 
 function showFormError(message: string) {

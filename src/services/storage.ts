@@ -1,4 +1,4 @@
-import type { Session, SiteData, SessionStorage } from '../types';
+import type { Session, SiteData, SessionStorage, EnabledStorageTypes } from '../types';
 
 const STORAGE_KEY = 'multiSessionData';
 
@@ -18,6 +18,17 @@ async function saveAllData(data: Record<string, SiteData>): Promise<void> {
  * Converts old `cookies: CookieEntry[]` format to new `sessionData: SessionStorage` format
  */
 function migrateSessionFormat(session: Session): Session {
+  // Ensure enabledStorageTypes is set (default to all enabled for backward compatibility)
+  if (!session.enabledStorageTypes) {
+    (session as any).enabledStorageTypes = {
+      cookies: true,
+      localStorage: true,
+      sessionStorage: true,
+      indexedDB: true,
+      webSQL: true,
+    };
+  }
+
   // If already migrated (has sessionData), return as-is
   if (session.sessionData) {
     return session;
@@ -27,6 +38,13 @@ function migrateSessionFormat(session: Session): Session {
   if (session.cookies) {
     const newSession: Session = {
       ...session,
+      enabledStorageTypes: {
+        cookies: true,
+        localStorage: false,
+        sessionStorage: false,
+        indexedDB: false,
+        webSQL: false,
+      },
       sessionData: {
         cookies: session.cookies,
         localStorage: [],
@@ -41,7 +59,7 @@ function migrateSessionFormat(session: Session): Session {
     return newSession;
   }
 
-  // Fallback: create empty sessionData
+  // Fallback: create empty sessionData with all types enabled
   return {
     ...session,
     sessionData: {
@@ -89,17 +107,30 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
 }
 
+/** Get default enabled storage types (all enabled) */
+export function getDefaultEnabledStorageTypes(): EnabledStorageTypes {
+  return {
+    cookies: true,
+    localStorage: true,
+    sessionStorage: true,
+    indexedDB: true,
+    webSQL: true,
+  };
+}
+
 /** Add a new session for a site */
 export async function addSession(
   hostname: string,
   label: string,
-  sessionData: SessionStorage
+  sessionData: SessionStorage,
+  enabledStorageTypes: EnabledStorageTypes = getDefaultEnabledStorageTypes()
 ): Promise<Session> {
   const siteData = await getSiteData(hostname);
   const now = Date.now();
   const session: Session = {
     id: generateId(),
     label,
+    enabledStorageTypes,
     sessionData,
     createdAt: now,
     updatedAt: now,
@@ -131,20 +162,29 @@ export async function addSessionFromCookies(
     webSQL: [],
     fileSystem: [],
   };
-  return addSession(hostname, label, sessionData);
+  // Legacy format: only cookies enabled
+  const enabledStorageTypes: EnabledStorageTypes = {
+    cookies: true,
+    localStorage: false,
+    sessionStorage: false,
+    indexedDB: false,
+    webSQL: false,
+  };
+  return addSession(hostname, label, sessionData, enabledStorageTypes);
 }
 
 /** Update an existing session's label and/or session data */
 export async function updateSession(
   hostname: string,
   sessionId: string,
-  updates: { label?: string; sessionData?: SessionStorage }
+  updates: { label?: string; enabledStorageTypes?: EnabledStorageTypes; sessionData?: SessionStorage }
 ): Promise<Session | null> {
   const siteData = await getSiteData(hostname);
   const session = siteData.sessions.find((s) => s.id === sessionId);
   if (!session) return null;
 
   if (updates.label !== undefined) session.label = updates.label;
+  if (updates.enabledStorageTypes !== undefined) session.enabledStorageTypes = updates.enabledStorageTypes;
   if (updates.sessionData !== undefined) session.sessionData = updates.sessionData;
   session.updatedAt = Date.now();
 

@@ -9,6 +9,8 @@ let allSitesData: Record<string, SiteData> = {};
 const collapsedSites = new Set<string>();
 let editingContext: { hostname: string; sessionId: string } | null = null;
 let pendingDelete: { hostname: string; sessionId: string; label: string } | null = null;
+let capturePending = false;
+let captureHostname = '';
 
 // ─── DOM refs ───
 const $loading = document.getElementById('loading')!;
@@ -21,6 +23,7 @@ const $modalOverlay = document.getElementById('modal-overlay')!;
 const $modalTitle = document.getElementById('modal-title')!;
 const $sessionForm = document.getElementById('session-form')! as HTMLFormElement;
 const $inputLabel = document.getElementById('input-label')! as HTMLInputElement;
+const $storageTypeCheckboxes = document.querySelectorAll('input[name="storage-type"]') as NodeListOf<HTMLInputElement>;
 const $inputCookies = document.getElementById('input-cookies')! as HTMLTextAreaElement;
 const $inputLocalStorage = document.getElementById('input-localStorage')! as HTMLTextAreaElement;
 const $inputSessionStorage = document.getElementById('input-sessionStorage')! as HTMLTextAreaElement;
@@ -36,6 +39,11 @@ const $deleteOverlay = document.getElementById('delete-overlay')!;
 const $deleteLabel = document.getElementById('delete-label')!;
 const $btnDeleteCancel = document.getElementById('btn-delete-cancel')!;
 const $btnDeleteConfirm = document.getElementById('btn-delete-confirm')!;
+
+const $captureOverlay = document.getElementById('capture-overlay')!;
+const $captureTypeCheckboxes = document.querySelectorAll('input[name="capture-type"]') as NodeListOf<HTMLInputElement>;
+const $btnCaptureCancel = document.getElementById('btn-capture-cancel')!;
+const $btnCaptureConfirm = document.getElementById('btn-capture-confirm')!;
 
 const $toast = document.getElementById('toast')!;
 
@@ -311,6 +319,13 @@ $deleteOverlay.addEventListener('click', (e) => {
   if (e.target === $deleteOverlay) closeDeleteDialog();
 });
 
+// Capture dialog
+$btnCaptureCancel.addEventListener('click', closeCaptureDialog);
+$btnCaptureConfirm.addEventListener('click', handleCaptureConfirm);
+$captureOverlay.addEventListener('click', (e) => {
+  if (e.target === $captureOverlay) closeCaptureDialog();
+});
+
 // ─── Handlers ───
 
 function openAddModal(hostname: string) {
@@ -331,6 +346,20 @@ function handleEdit(hostname: string, sessionId: string) {
   editingContext = { hostname, sessionId };
   $modalTitle.textContent = `Edit Session — ${hostname}`;
   $inputLabel.value = session.label;
+  
+  // Set the storage type checkboxes based on enabledStorageTypes
+  const enabled = session.enabledStorageTypes || {
+    cookies: true,
+    localStorage: true,
+    sessionStorage: true,
+    indexedDB: true,
+    webSQL: true,
+  };
+  
+  $storageTypeCheckboxes.forEach((checkbox) => {
+    checkbox.checked = enabled[checkbox.value as keyof typeof enabled] ?? true;
+  });
+  
   $inputCookies.value = JSON.stringify(session.sessionData.cookies, null, 2);
   $inputLocalStorage.value = JSON.stringify(session.sessionData.localStorage, null, 2);
   $inputSessionStorage.value = JSON.stringify(session.sessionData.sessionStorage, null, 2);
@@ -346,6 +375,22 @@ async function handleSave() {
   if (!editingContext) return;
 
   const label = $inputLabel.value.trim();
+  
+  // Collect enabled storage types from checkboxes
+  const enabledStorageTypes: any = {
+    cookies: false,
+    localStorage: false,
+    sessionStorage: false,
+    indexedDB: false,
+    webSQL: false,
+  };
+  
+  $storageTypeCheckboxes.forEach((checkbox) => {
+    if (checkbox.checked) {
+      enabledStorageTypes[checkbox.value] = true;
+    }
+  });
+  
   const cookieText = $inputCookies.value.trim();
   const localStorageText = $inputLocalStorage.value.trim();
   const sessionStorageText = $inputSessionStorage.value.trim();
@@ -432,9 +477,9 @@ async function handleSave() {
 
   try {
     if (sessionId) {
-      await updateSession(hostname, sessionId, { label, sessionData });
+      await updateSession(hostname, sessionId, { label, enabledStorageTypes, sessionData });
     } else {
-      await addSession(hostname, label, sessionData);
+      await addSession(hostname, label, sessionData, enabledStorageTypes);
     }
     closeModal();
     await loadAllData();
@@ -533,6 +578,67 @@ function closeModal() {
 function closeDeleteDialog() {
   $deleteOverlay.classList.add('hidden');
   pendingDelete = null;
+}
+
+function closeCaptureDialog() {
+  $captureOverlay.classList.add('hidden');
+  capturePending = false;
+  captureHostname = '';
+}
+
+async function handleCaptureConfirm() {
+  if (!capturePending || !captureHostname) return;
+
+  $btnCaptureConfirm.setAttribute('disabled', '');
+  try {
+    // Get the active tab
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) throw new Error('No active tab found');
+
+    // Collect enabled storage types from checkboxes
+    const enabledStorageTypes: any = {
+      cookies: false,
+      localStorage: false,
+      sessionStorage: false,
+      indexedDB: false,
+      webSQL: false,
+    };
+
+    $captureTypeCheckboxes.forEach((checkbox) => {
+      if (checkbox.checked) {
+        enabledStorageTypes[checkbox.value] = true;
+      }
+    });
+
+    const sessionData = await chrome.runtime.sendMessage({
+      type: 'CAPTURE_CURRENT',
+      hostname: captureHostname,
+      tabId: activeTab.id,
+      enabledStorageTypes,
+    });
+
+    const stats = getStorageStats(sessionData);
+    const totalItems = stats.cookies + stats.localStorage + stats.sessionStorage + stats.indexedDB + stats.webSQL;
+
+    if (totalItems === 0) {
+      showToast('No session data found for this site');
+      closeCaptureDialog();
+      return;
+    }
+
+    const siteData = allSitesData[captureHostname];
+    const label = `Session ${(siteData?.sessions.length || 0) + 1}`;
+    await addSession(captureHostname, label, sessionData, enabledStorageTypes);
+
+    closeCaptureDialog();
+    await loadAndRender();
+    showToast(`Captured ${totalItems} storage items`);
+  } catch (err) {
+    console.error('Capture failed:', err);
+    showToast('Failed to capture session data');
+  } finally {
+    $btnCaptureConfirm.removeAttribute('disabled');
+  }
 }
 
 function showFormError(message: string) {

@@ -246,20 +246,31 @@ async function captureClientStorage(
 export async function captureAllSessionData(
   hostname: string,
   tabId: number,
-  storeId?: string
+  storeId?: string,
+  enabledStorageTypes?: any
 ): Promise<SessionStorage> {
+  // Default to capturing all types if not specified
+  const captureConfig = {
+    cookies: true,
+    localStorage: true,
+    sessionStorage: true,
+    indexedDB: true,
+    webSQL: true,
+    ...enabledStorageTypes,
+  };
+
   // First get client storage to discover all domains on the page
   const clientStorage = await captureClientStorage(tabId);
 
   // Then capture cookies for the main hostname + discovered domains
-  const cookies = await captureCookies(hostname, storeId, clientStorage.domains);
+  const cookies = captureConfig.cookies ? await captureCookies(hostname, storeId, clientStorage.domains) : [];
 
   return {
     cookies,
-    localStorage: clientStorage.localStorage,
-    sessionStorage: clientStorage.sessionStorage,
-    indexedDB: clientStorage.indexedDB,
-    webSQL: clientStorage.webSQL,
+    localStorage: captureConfig.localStorage ? clientStorage.localStorage : [],
+    sessionStorage: captureConfig.sessionStorage ? clientStorage.sessionStorage : [],
+    indexedDB: captureConfig.indexedDB ? clientStorage.indexedDB : [],
+    webSQL: captureConfig.webSQL ? clientStorage.webSQL : [],
     fileSystem: [], // FileSystem API support deferred for now
   };
 }
